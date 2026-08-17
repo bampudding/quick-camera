@@ -199,22 +199,34 @@ class QCAppDelegate: NSObject, NSApplicationDelegate, QCUsbWatcherDelegate {
         menu.addItem(defaultItem)
         menu.addItem(NSMenuItem.separator())
 
-        let options: [(key: String, title: String, preset: AVCaptureSession.Preset)] = [
-            ("640x480", "640 x 480", .vga640x480),
-            ("1280x720", "1280 x 720", .hd1280x720),
-            ("1920x1080", "1920 x 1080", .hd1920x1080),
-            ("3840x2160", "3840 x 2160", .hd4K3840x2160),
-        ]
-        for option: (key: String, title: String, preset: AVCaptureSession.Preset) in options {
+        for option: (key: String, title: String) in self.supportedResolutions() {
             let item: NSMenuItem = NSMenuItem(
                 title: option.title, action: #selector(resolutionMenuChanged), keyEquivalent: "")
             item.target = self
             item.representedObject = option.key
-            item.isEnabled = captureSession.canSetSessionPreset(option.preset)
             menu.addItem(item)
         }
         resolutionMenu.submenu = menu
         self.updateResolutionMenuStates()
+    }
+
+    // Unique "<width>x<height>" combinations offered by the current device's formats,
+    // sorted by area (e.g. 640x480, 1280x720, 1920x1200, ...)
+    func supportedResolutions() -> [(key: String, title: String)] {
+        var seen: Set<String> = Set<String>()
+        var results: [(key: String, title: String, area: Int)] = []
+        for format: AVCaptureDevice.Format in self.input.device.formats {
+            let width: Int = Int(format.formatDescription.dimensions.width)
+            let height: Int = Int(format.formatDescription.dimensions.height)
+            guard width > 0, height > 0 else { continue }
+            let key: String = "\(width)x\(height)"
+            if seen.contains(key) { continue }
+            seen.insert(key)
+            results.append((key, "\(width) x \(height)", width * height))
+        }
+        return results.sorted { $0.area < $1.area }.map {
+            (key: $0.key, title: $0.title)
+        }
     }
 
     func buildFrameRateMenu() {
@@ -269,45 +281,71 @@ class QCAppDelegate: NSObject, NSApplicationDelegate, QCUsbWatcherDelegate {
         }
     }
 
-    private func preset(for resolution: String) -> AVCaptureSession.Preset? {
-        switch resolution {
-        case "640x480": return .vga640x480
-        case "1280x720": return .hd1280x720
-        case "1920x1080": return .hd1920x1080
-        case "3840x2160": return .hd4K3840x2160
-        default: return nil
+    // Returns the first device format matching the "<width>x<height>" resolution key,
+    // preferring one that also supports the requested frame rate.
+    private func format(for resolution: String, fps: Int, on device: AVCaptureDevice) -> AVCaptureDevice.Format? {
+        let parts: [Substring] = resolution.split(separator: "x")
+        guard parts.count == 2, let width: Int = Int(parts[0]), let height: Int = Int(parts[1]) else {
+            return nil
         }
-    }
-
-    private func isFrameRateSupported(_ fps: Int, on device: AVCaptureDevice) -> Bool {
-        let rate: Double = Double(fps)
-        for format: AVCaptureDevice.Format in device.formats {
-            for range: AVFrameRateRange in format.videoSupportedFrameRateRanges {
-                if range.minFrameRate <= rate && rate <= range.maxFrameRate {
-                    return true
-                }
+        var candidates: [AVCaptureDevice.Format] = device.formats.filter { format in
+            Int(format.formatDescription.dimensions.width) == width
+                && Int(format.formatDescription.dimensions.height) == height
+        }
+        if fps > 0 {
+            if let matching = candidates.first(where: {
+                self.formatSupportsFrameRate(fps, format: $0)
+            }) {
+                return matching
             }
         }
-        return false
+        return candidates.first
+    }
+
+    private func formatSupportsFrameRate(_ fps: Int, format: AVCaptureDevice.Format) -> Bool {
+        let rate: Double = Double(fps)
+        return format.videoSupportedFrameRateRanges.contains { range in
+            range.minFrameRate <= rate && rate <= range.maxFrameRate
+        }
     }
 
     func applyCaptureSettings() {
-        NSLog("Applying capture settings : resolution %@ , frameRate %d", self.resolution, self.frameRate)
+        NSLog(
+            "Applying capture settings : resolution %@ , frameRate %d", self.resolution,
+            self.frameRate)
         guard let device: AVCaptureDevice = self.input?.device else { return }
         captureSession.beginConfiguration()
 
-        if let selectedPreset = self.preset(for: self.resolution) {
-            if captureSession.canSetSessionPreset(selectedPreset) {
-                captureSession.sessionPreset = selectedPreset
-            }
-        }
+        let selectedFormat: AVCaptureDevice.Format? = self.format(
+            for: self.resolution, fps: self.frameRate, on: device)
 
+        if self.resolution == "default" {
+            // back to the session's standard preset (device native resolution)
+            if captureSession.canSetSessionPreset(.high) {
+                captureSession.sessionPreset = .high
+            }
+        } else if let format = selectedFormat {
+            device.activeFormat = format
+        }
+        // no matching format for this device -> leave the current format untouched
+
+        let targetFormat: AVCaptureDevice.Format = selectedFormat ?? device.activeFormat
         if self.frameRate > 0 {
-            if self.isFrameRateSupported(self.frameRate, on: device) {
+            if self.formatSupportsFrameRate(self.frameRate, format: targetFormat) {
                 device.activeVideoMinFrameDuration = CMTime(
                     value: 1, timescale: CMTimeScale(self.frameRate))
                 device.activeVideoMaxFrameDuration = CMTime(
                     value: 1, timescale: CMTimeScale(self.frameRate))
+            } else if selectedFormat != nil {
+                // newly selected format cannot run at the requested rate: pin it to its fastest
+                let ranges: [AVFrameRateRange] = targetFormat.videoSupportedFrameRateRanges
+                let fastest: CMTime? = ranges.map { $0.minFrameDuration }.min {
+                    CMTimeCompare($0, $1) < 0
+                }
+                if let fastest = fastest {
+                    device.activeVideoMinFrameDuration = fastest
+                    device.activeVideoMaxFrameDuration = fastest
+                }
             }
         }
 
