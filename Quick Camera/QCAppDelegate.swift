@@ -16,6 +16,8 @@ class QCAppDelegate: NSObject, NSApplicationDelegate, QCUsbWatcherDelegate {
     // MARK: - Interface Builder Outlets
     @IBOutlet weak var window: NSWindow!
     @IBOutlet weak var selectSourceMenu: NSMenuItem!
+    @IBOutlet weak var resolutionMenu: NSMenuItem!
+    @IBOutlet weak var frameRateMenu: NSMenuItem!
     @IBOutlet weak var borderlessMenu: NSMenuItem!
     @IBOutlet weak var aspectRatioFixedMenu: NSMenuItem!
     @IBOutlet weak var mirroredMenu: NSMenuItem!
@@ -46,6 +48,14 @@ class QCAppDelegate: NSObject, NSApplicationDelegate, QCUsbWatcherDelegate {
     var deviceName: String {
         get { QCSettingsManager.shared.deviceName }
         set { QCSettingsManager.shared.setDeviceName(newValue) }
+    }
+    var resolution: String {
+        get { QCSettingsManager.shared.resolution }
+        set { QCSettingsManager.shared.setResolution(newValue) }
+    }
+    var frameRate: Int {
+        get { QCSettingsManager.shared.frameRate }
+        set { QCSettingsManager.shared.setFrameRate(newValue) }
     }
 
     // MARK: - Window Properties
@@ -146,6 +156,9 @@ class QCAppDelegate: NSObject, NSApplicationDelegate, QCUsbWatcherDelegate {
             self.windowTitle = String(format: "Quick Camera: [%@]", device.localizedName)
             self.window.title = self.windowTitle
             self.deviceName = device.localizedName
+            self.buildResolutionMenu()
+            self.buildFrameRateMenu()
+            self.applyCaptureSettings()
             self.applySettings()
         } catch {
             NSLog("Error while opening device")
@@ -154,6 +167,166 @@ class QCAppDelegate: NSObject, NSApplicationDelegate, QCUsbWatcherDelegate {
                     "Unfortunately, there was an error when trying to access the camera. Try again or select a different one."
             )
         }
+    }
+
+    // MARK: - Capture Format Settings
+    @objc func resolutionMenuChanged(_ sender: NSMenuItem) {
+        NSLog("Resolution menu item selected")
+        guard let value: String = sender.representedObject as? String else { return }
+        self.resolution = value
+        self.updateResolutionMenuStates()
+        self.applyCaptureSettings()
+    }
+
+    @objc func frameRateMenuChanged(_ sender: NSMenuItem) {
+        NSLog("Frame Rate menu item selected")
+        guard let value: Int = sender.representedObject as? Int else { return }
+        self.frameRate = value
+        self.updateFrameRateMenuStates()
+        if value == 0 {
+            self.restoreDefaultFrameRate()
+        } else {
+            self.applyCaptureSettings()
+        }
+    }
+
+    func buildResolutionMenu() {
+        let menu: NSMenu = NSMenu(title: "Resolution")
+        let defaultItem: NSMenuItem = NSMenuItem(
+            title: "Default", action: #selector(resolutionMenuChanged), keyEquivalent: "")
+        defaultItem.target = self
+        defaultItem.representedObject = "default"
+        menu.addItem(defaultItem)
+        menu.addItem(NSMenuItem.separator())
+
+        let options: [(key: String, title: String, preset: AVCaptureSession.Preset)] = [
+            ("640x480", "640 x 480", .vga640x480),
+            ("1280x720", "1280 x 720", .hd1280x720),
+            ("1920x1080", "1920 x 1080", .hd1920x1080),
+            ("3840x2160", "3840 x 2160", .hd4K3840x2160),
+        ]
+        for option: (key: String, title: String, preset: AVCaptureSession.Preset) in options {
+            let item: NSMenuItem = NSMenuItem(
+                title: option.title, action: #selector(resolutionMenuChanged), keyEquivalent: "")
+            item.target = self
+            item.representedObject = option.key
+            item.isEnabled = captureSession.canSetSessionPreset(option.preset)
+            menu.addItem(item)
+        }
+        resolutionMenu.submenu = menu
+        self.updateResolutionMenuStates()
+    }
+
+    func buildFrameRateMenu() {
+        let menu: NSMenu = NSMenu(title: "Frame Rate")
+        let defaultItem: NSMenuItem = NSMenuItem(
+            title: "Default", action: #selector(frameRateMenuChanged), keyEquivalent: "")
+        defaultItem.target = self
+        defaultItem.representedObject = 0
+        menu.addItem(defaultItem)
+        menu.addItem(NSMenuItem.separator())
+
+        for fps: Int in self.supportedFrameRates() {
+            let item: NSMenuItem = NSMenuItem(
+                title: String(format: "%d fps", fps), action: #selector(frameRateMenuChanged),
+                keyEquivalent: "")
+            item.target = self
+            item.representedObject = fps
+            menu.addItem(item)
+        }
+        frameRateMenu.submenu = menu
+        self.updateFrameRateMenuStates()
+    }
+
+    func supportedFrameRates() -> [Int] {
+        var rates: Set<Int> = Set<Int>()
+        for format: AVCaptureDevice.Format in self.input.device.formats {
+            for range: AVFrameRateRange in format.videoSupportedFrameRateRanges {
+                rates.insert(Int(range.minFrameRate.rounded()))
+                rates.insert(Int(range.maxFrameRate.rounded()))
+            }
+        }
+        return rates.filter { $0 >= 10 }.sorted()
+    }
+
+    func updateResolutionMenuStates() {
+        guard let items = resolutionMenu.submenu?.items else { return }
+        for item: NSMenuItem in items {
+            if let key: String = item.representedObject as? String {
+                item.state =
+                    (key == self.resolution) ? NSControl.StateValue.on : NSControl.StateValue.off
+            }
+        }
+    }
+
+    func updateFrameRateMenuStates() {
+        guard let items = frameRateMenu.submenu?.items else { return }
+        for item: NSMenuItem in items {
+            if let fps: Int = item.representedObject as? Int {
+                item.state =
+                    (fps == self.frameRate) ? NSControl.StateValue.on : NSControl.StateValue.off
+            }
+        }
+    }
+
+    private func preset(for resolution: String) -> AVCaptureSession.Preset? {
+        switch resolution {
+        case "640x480": return .vga640x480
+        case "1280x720": return .hd1280x720
+        case "1920x1080": return .hd1920x1080
+        case "3840x2160": return .hd4K3840x2160
+        default: return nil
+        }
+    }
+
+    private func isFrameRateSupported(_ fps: Int, on device: AVCaptureDevice) -> Bool {
+        let rate: Double = Double(fps)
+        for format: AVCaptureDevice.Format in device.formats {
+            for range: AVFrameRateRange in format.videoSupportedFrameRateRanges {
+                if range.minFrameRate <= rate && rate <= range.maxFrameRate {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    func applyCaptureSettings() {
+        NSLog("Applying capture settings : resolution %@ , frameRate %d", self.resolution, self.frameRate)
+        guard let device: AVCaptureDevice = self.input?.device else { return }
+        captureSession.beginConfiguration()
+
+        if let selectedPreset = self.preset(for: self.resolution) {
+            if captureSession.canSetSessionPreset(selectedPreset) {
+                captureSession.sessionPreset = selectedPreset
+            }
+        }
+
+        if self.frameRate > 0 {
+            if self.isFrameRateSupported(self.frameRate, on: device) {
+                device.activeVideoMinFrameDuration = CMTime(
+                    value: 1, timescale: CMTimeScale(self.frameRate))
+                device.activeVideoMaxFrameDuration = CMTime(
+                    value: 1, timescale: CMTimeScale(self.frameRate))
+            }
+        }
+
+        captureSession.commitConfiguration()
+    }
+
+    private func restoreDefaultFrameRate() {
+        NSLog("Restoring default frame rate")
+        guard let device: AVCaptureDevice = self.input?.device else { return }
+        captureSession.beginConfiguration()
+        let ranges: [AVFrameRateRange] = device.activeFormat.videoSupportedFrameRateRanges
+        let fastest: CMTime? = ranges.map { $0.minFrameDuration }.min {
+            CMTimeCompare($0, $1) < 0
+        }
+        if let fastest = fastest {
+            device.activeVideoMinFrameDuration = fastest
+            device.activeVideoMaxFrameDuration = fastest
+        }
+        captureSession.commitConfiguration()
     }
 
     // MARK: - Settings Management

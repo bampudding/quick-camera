@@ -10,6 +10,10 @@ class QCSettingsManager {
     private(set) var position: Int = 0
     private(set) var deviceName: String = "-"
     private(set) var savedDeviceName: String = "-"
+    // Store resolution as "default" or a "<width>x<height>" string, e.g. "1280x720"
+    private(set) var resolution: String = "default"
+    // 0 = default (device native), otherwise the frame rate in fps
+    private(set) var frameRate: Int = 0
 
     // MARK: - Frame Properties
     private(set) var frameX: Float = 100
@@ -49,6 +53,14 @@ class QCSettingsManager {
         deviceName = value
     }
 
+    func setResolution(_ value: String) {
+        resolution = value
+    }
+
+    func setFrameRate(_ value: Int) {
+        frameRate = value
+    }
+
     func setFrameProperties(x: Float, y: Float, width: Float, height: Float) {
         frameX = x
         frameY = y
@@ -67,6 +79,8 @@ class QCSettingsManager {
         isAspectRatioFixed =
             UserDefaults.standard.object(forKey: "aspectRatioFixed") as? Bool ?? false
         position = UserDefaults.standard.object(forKey: "position") as? Int ?? 0
+        resolution = UserDefaults.standard.object(forKey: "resolution") as? String ?? "default"
+        frameRate = UserDefaults.standard.object(forKey: "frameRate") as? Int ?? 0
 
         frameWidth = UserDefaults.standard.object(forKey: "frameW") as? Float ?? 0
         frameHeight = UserDefaults.standard.object(forKey: "frameH") as? Float ?? 0
@@ -87,6 +101,8 @@ class QCSettingsManager {
         UserDefaults.standard.set(isUpsideDown, forKey: "upsideDown")
         UserDefaults.standard.set(isAspectRatioFixed, forKey: "aspectRatioFixed")
         UserDefaults.standard.set(position, forKey: "position")
+        UserDefaults.standard.set(resolution, forKey: "resolution")
+        UserDefaults.standard.set(frameRate, forKey: "frameRate")
         UserDefaults.standard.set(frameX, forKey: "frameX")
         UserDefaults.standard.set(frameY, forKey: "frameY")
         UserDefaults.standard.set(frameWidth, forKey: "frameW")
@@ -102,12 +118,12 @@ class QCSettingsManager {
 
     func logSettings(label: String) {
         NSLog(
-            "%@ : %@,%@,%@borderless,%@mirrored,%@upsideDown,%@aspectRetioFixed,position:%d",
+            "%@ : %@,%@,%@borderless,%@mirrored,%@upsideDown,%@aspectRatioFixed,position:%d,resolution:%@,frameRate:%d",
             label, deviceName, savedDeviceName,
             isBorderless ? "+" : "-",
             isMirrored ? "+" : "-",
             isUpsideDown ? "+" : "-",
             isAspectRatioFixed ? "+" : "-",
-            position)
+            position, resolution, frameRate)
     }
 }

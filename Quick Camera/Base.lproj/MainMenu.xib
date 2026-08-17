@@ -104,6 +104,18 @@
                                     </items>
                                 </menu>
                             </menuItem>
+                            <menuItem title="Resolution" id="xRs-1a-qCx">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <menu key="submenu" title="Resolution" id="xRs-2a-qDx">
+                                    <items/>
+                                </menu>
+                            </menuItem>
+                            <menuItem title="Frame Rate" id="xFps-1a-qCx">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <menu key="submenu" title="Frame Rate" id="xFps-2a-qDx">
+                                    <items/>
+                                </menu>
+                            </menuItem>
                             <menuItem title="Save Image" keyEquivalent="s" id="iBa-Au-CgF">
                                 <connections>
                                     <action selector="saveImage:" target="494" id="2e0-wH-zXa"/>
@@ -415,8 +427,10 @@
             <connections>
                 <outlet property="aspectRatioFixedMenu" destination="eHX-9R-cym" id="GfZ-zt-Ngf"/>
                 <outlet property="borderlessMenu" destination="651" id="4dH-7A-gNz"/>
+                <outlet property="frameRateMenu" destination="xFps-1a-qCx" id="QFr-0a-1fM"/>
                 <outlet property="mirroredMenu" destination="78" id="tGe-Jf-YeE"/>
                 <outlet property="playerView" destination="372" id="tVX-fO-IZ2"/>
+                <outlet property="resolutionMenu" destination="xRs-1a-qCx" id="PRs-0a-1fM"/>
                 <outlet property="selectSourceMenu" destination="124" id="h5v-Cn-4oU"/>
                 <outlet property="upsideDownMenu" destination="658" id="Vs1-9X-1BU"/>
                 <outlet property="window" destination="371" id="fTI-Cc-re1"/>
